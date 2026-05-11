@@ -1,7 +1,8 @@
 import json
+from pathlib import Path
 import websocket
 
-from codex_session_delete.cdp import BRIDGE_BINDING_NAME, _bridge_loop, build_bridge_script, list_targets, pick_page_target
+from codex_session_delete.cdp import BRIDGE_BINDING_NAME, _bridge_loop, build_bridge_script, inject_file, list_targets, pick_page_target
 
 
 class TimeoutThenMessageSocket:
@@ -80,6 +81,29 @@ def test_build_bridge_script_installs_binding_callbacks():
     assert "window.__codexSessionDeleteReject" in script
 
 
+def test_inject_file_prefix_exposes_binding_and_http_token(monkeypatch, tmp_path):
+    script_path = tmp_path / "inject.js"
+    script_path.write_text("console.log('ok')", encoding="utf-8")
+    seen = {}
+
+    monkeypatch.setattr("codex_session_delete.cdp.list_targets", lambda port: [{"type": "page", "title": "Codex", "url": "app://codex", "webSocketDebuggerUrl": "ws://page"}])
+    monkeypatch.setattr("codex_session_delete.cdp.install_bridge", lambda websocket_url, binding_name, handler: {"bridge": True})
+
+    def fake_evaluate_script(websocket_url, script):
+        seen["websocket_url"] = websocket_url
+        seen["script"] = script
+        return {"result": {}}
+
+    monkeypatch.setattr("codex_session_delete.cdp.evaluate_script", fake_evaluate_script)
+
+    inject_file(9229, script_path, 57321, handler=lambda path, payload: {"status": "ok"}, http_mutation_token="token-1")
+
+    assert seen["websocket_url"] == "ws://page"
+    assert "window.__CODEX_SESSION_DELETE_HELPER__ = 'http://127.0.0.1:57321';" in seen["script"]
+    assert 'window.__CODEX_SESSION_DELETE_BINDING__ = "codexSessionDeleteV2";' in seen["script"]
+    assert 'window.__CODEX_SESSION_DELETE_HTTP_TOKEN__ = "token-1";' in seen["script"]
+
+
 def test_bridge_binding_name_is_versioned_for_reinjection():
     assert BRIDGE_BINDING_NAME == "codexSessionDeleteV2"
 
@@ -88,6 +112,15 @@ def test_bridge_loop_continues_after_idle_timeout():
     ws = TimeoutThenMessageSocket()
 
     _bridge_loop(ws, lambda path, payload: {"status": "ok", "path": path})
+
+    assert ws.recv_count == 3
+    assert "__codexSessionDeleteResolve" in ws.sent[0]
+
+
+def test_bridge_loop_supports_export_markdown_payload():
+    ws = TimeoutThenMessageSocket()
+
+    _bridge_loop(ws, lambda path, payload: {"status": "exported" if path == "/export-markdown" else "ok", "filename": "thread.md"})
 
     assert ws.recv_count == 3
     assert "__codexSessionDeleteResolve" in ws.sent[0]

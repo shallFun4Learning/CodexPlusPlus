@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import uuid
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,8 @@ from codex_session_delete.api_adapter import ApiAdapter, UnavailableApiAdapter
 from codex_session_delete.backup_store import BackupStore
 from codex_session_delete.cdp import inject_file
 from codex_session_delete.helper_server import HelperServer
-from codex_session_delete.models import DeleteResult, DeleteStatus, SessionRef
+from codex_session_delete.markdown_exporter import MarkdownExportService
+from codex_session_delete.models import DeleteResult, DeleteStatus, ExportResult, ExportStatus, SessionRef
 from codex_session_delete.storage_adapter import SQLiteStorageAdapter
 
 
@@ -231,8 +233,14 @@ def launch_codex_app(app_dir: Path, debug_port: int) -> Any:
     return subprocess.Popen(build_codex_command(app_dir, debug_port), env=env)
 
 
-def start_helper(service, host: str = "127.0.0.1", port: int = 57321) -> HelperServer:
-    server = InjectedHelperServer(host, port, service)
+def start_helper(
+    service,
+    export_service: MarkdownExportService | None = None,
+    host: str = "127.0.0.1",
+    port: int = 57321,
+    http_mutation_token: str | None = None,
+) -> HelperServer:
+    server = InjectedHelperServer(host, port, service, export_service=export_service, http_mutation_token=http_mutation_token)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
@@ -243,11 +251,26 @@ def shutdown_helper(server: HelperServer) -> None:
     server.server_close()
 
 
-def inject_with_retry(debug_port: int, script_path: Path, helper_port: int, service: ApiFirstDeleteService, attempts: int = 20, delay: float = 0.5) -> Any:
+def inject_with_retry(
+    debug_port: int,
+    script_path: Path,
+    helper_port: int,
+    service: ApiFirstDeleteService,
+    export_service: MarkdownExportService | None,
+    http_mutation_token: str | None,
+    attempts: int = 20,
+    delay: float = 0.5,
+) -> Any:
     last_error: Exception | None = None
     for _ in range(attempts):
         try:
-            return inject_file(debug_port, script_path, helper_port, lambda path, payload: handle_bridge_request(service, path, payload))
+            return inject_file(
+                debug_port,
+                script_path,
+                helper_port,
+                lambda path, payload: handle_bridge_request(service, export_service, path, payload),
+                http_mutation_token=http_mutation_token,
+            )
         except Exception as exc:
             last_error = exc
             time.sleep(delay)
@@ -263,12 +286,14 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
     debug_port = select_windows_loopback_port(debug_port)
     helper_port = select_windows_loopback_port(helper_port)
     service = ApiFirstDeleteService(UnavailableApiAdapter(), db_path, backup_dir)
-    server = start_helper(service, port=helper_port)
+    export_service = MarkdownExportService(db_path)
+    http_mutation_token = secrets.token_urlsafe(24)
+    server = start_helper(service, export_service, port=helper_port, http_mutation_token=http_mutation_token)
     codex_proc = None
     try:
         codex_proc = launch_codex_app(resolved_app_dir, debug_port)
         script_path = Path(__file__).parent / "inject" / "renderer-inject.js"
-        server.bridge_socket = inject_with_retry(debug_port, script_path, server.port, service)
+        server.bridge_socket = inject_with_retry(debug_port, script_path, server.port, service, export_service, http_mutation_token)
         return server, codex_proc
     except Exception:
         shutdown_helper(server)
@@ -296,7 +321,12 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
         raise
 
 
-def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: dict[str, object]) -> dict[str, object]:
+def handle_bridge_request(
+    service: ApiFirstDeleteService,
+    export_service: MarkdownExportService | None,
+    path: str,
+    payload: dict[str, object],
+) -> dict[str, object]:
     if path == "/delete":
         session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
         return service.delete(session).to_dict()
@@ -305,4 +335,9 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
     if path == "/archived-thread":
         session = service.find_archived_thread_by_title(str(payload.get("title", "")))
         return {"session_id": session.session_id, "title": session.title} if session else {"session_id": "", "title": ""}
+    if path == "/export-markdown":
+        if export_service is None:
+            return ExportResult(ExportStatus.FAILED, str(payload.get("session_id", "")), "Markdown export unavailable").to_dict()
+        session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+        return export_service.export(session).to_dict()
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

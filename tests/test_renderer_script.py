@@ -12,10 +12,12 @@ def test_renderer_script_exists_and_parses_with_node():
 def test_renderer_script_contains_hover_delete_contract():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "codex-delete-button" in text
+    assert "codex-export-button" in text
     assert "MutationObserver" in text
     assert "confirmDelete" in text
     assert "/delete" in text
     assert "/undo" in text
+    assert "/export-markdown" in text
 
 
 def test_renderer_script_supports_codex_sidebar_thread_attributes():
@@ -41,6 +43,8 @@ def test_renderer_script_positions_delete_button_without_affecting_layout():
     assert "right: 28px" in text
     assert "top: 50%" in text
     assert "transform: translateY(-50%)" in text
+    assert "codex-thread-actions" in text
+    assert "display: inline-flex" in text
 
 
 
@@ -178,9 +182,7 @@ def test_renderer_script_toast_does_not_capture_page_interactions():
 def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unreliable():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "openDeleteConfirm" in text
-    assert "codexDeleteVersion = \"5\"" in text
-    assert "existingDeleteButtons.length === 1" in text
-    assert "existingDeleteButtons[0].dataset.codexDeleteVersion === codexDeleteVersion" in text
+    assert "codexDeleteVersion = \"6\"" in text
     assert "existingDeleteButtons.forEach((button) => button.remove())" in text
     assert "row.dataset.codexDeleteRow = \"false\"" in text
     assert "installDeleteButtonEventDelegation" in text
@@ -192,7 +194,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"4\"" in text
+    assert "codexDeleteStyleVersion = \"5\"" in text
     assert "right: 66px" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -261,11 +263,15 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 def test_renderer_script_uses_bridge_only_helper_calls():
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "window.__codexSessionDeleteBridge" in text
-    assert "fetch(" not in text
     assert "XMLHttpRequest" not in text
     assert "postJson(\"/delete\"" in text
     assert "postJson(\"/undo\"" in text
     assert "postJson(\"/archived-thread\"" in text
+    assert "postJson(\"/export-markdown\"" in text
+    assert "Blob([markdown]" in text
+    assert "X-Codex-Session-Delete-Token" in text
+    assert "postJsonViaHttp" in text
+    assert "bridgeReady()" in text
 
 
 def test_renderer_script_uses_chinese_delete_toast_fallbacks():
@@ -309,6 +315,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "pluginEntryUnlock" in text
     assert "forcePluginInstall" in text
     assert "sessionDelete" in text
+    assert "markdownExport" in text
+    assert "Markdown 导出" in text
     assert "codex-plus-modal-overlay" in text
     assert "codex-plus-modal-content" in text
     assert "codex-plus-modal-header" in text
@@ -318,6 +326,18 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "codex-plus-menu-floating" in text
     assert "findNativeMenuInsertionPoint" in text
     assert "if (!codexPlusSettings().nativeMenuPlacement) return null" in text
+
+
+def test_renderer_script_exports_and_archive_rows_include_export_button():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    assert "downloadMarkdown" in text
+    assert "showToast(result.message || \"导出成功\", null)" in text
+    assert "showToast(result.message || \"导出失败\", null)" in text
+    assert "exportButton.textContent = \"导出\"" in text
+    assert "row.dataset.codexArchiveExportRow = \"true\"" in text
+    assert ".replace(\"导出\", \"\")" in text
+    assert "button.classList.contains(exportButtonClass)" in text
+    assert "data-codex-archive-export-action" in text
     assert "right: 140px" in text
     assert "left: auto" in text
     assert "pointer-events: auto" in text

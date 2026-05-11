@@ -87,13 +87,24 @@ def install_bridge(websocket_url: str, binding_name: str, handler: BridgeHandler
     return ws
 
 
-def inject_file(port: int, script_path: Path, helper_port: int, handler: BridgeHandler | None = None) -> websocket.WebSocket | dict[str, object]:
+def inject_file(
+    port: int,
+    script_path: Path,
+    helper_port: int,
+    handler: BridgeHandler | None = None,
+    http_mutation_token: str | None = None,
+) -> websocket.WebSocket | dict[str, object]:
     targets = list_targets(port)
     target = pick_page_target(targets)
     websocket_url = str(target["webSocketDebuggerUrl"])
     bridge_socket = install_bridge(websocket_url, BRIDGE_BINDING_NAME, handler) if handler else None
     script = script_path.read_text(encoding="utf-8")
-    prefix = f"window.__CODEX_SESSION_DELETE_HELPER__ = 'http://127.0.0.1:{helper_port}';\n"
+    token_script = f"window.__CODEX_SESSION_DELETE_HTTP_TOKEN__ = {json.dumps(http_mutation_token)};\n"
+    prefix = (
+        f"window.__CODEX_SESSION_DELETE_HELPER__ = 'http://127.0.0.1:{helper_port}';\n"
+        f"window.__CODEX_SESSION_DELETE_BINDING__ = {json.dumps(BRIDGE_BINDING_NAME)};\n"
+        + token_script
+    )
     result = evaluate_script(websocket_url, prefix + script)
     return bridge_socket or result
 

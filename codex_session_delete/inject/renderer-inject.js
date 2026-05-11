@@ -1,10 +1,15 @@
 (() => {
   const helperBase = window.__CODEX_SESSION_DELETE_HELPER__ || "http://127.0.0.1:57321";
+  const helperToken = window.__CODEX_SESSION_DELETE_HTTP_TOKEN__ || "";
+  const bindingName = window.__CODEX_SESSION_DELETE_BINDING__ || "codexSessionDeleteV2";
   const buttonClass = "codex-delete-button";
+  const actionGroupClass = "codex-thread-actions";
+  const exportButtonClass = "codex-export-button";
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "4";
+  const codexDeleteStyleVersion = "5";
   const codexPlusMenuId = "codex-plus-menu";
-  const codexDeleteVersion = "5";
+  const codexDeleteVersion = "6";
+  const codexExportVersion = "1";
   const codexArchiveDeleteAllVersion = "2";
   const codexPlusVersion = "1.0.4";
   const codexPlusSettingsKey = "codexPlusSettings";
@@ -27,24 +32,36 @@
     style.id = styleId;
     style.dataset.codexDeleteStyleVersion = codexDeleteStyleVersion;
     style.textContent = `
-      .${buttonClass} {
+      .${actionGroupClass} {
         position: absolute;
         right: 28px;
         top: 50%;
         transform: translateY(-50%);
         z-index: 20;
         opacity: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .${buttonClass}, .${exportButtonClass} {
         border: 1px solid #ef4444;
         border-radius: 6px;
-        background: #fee2e2;
-        color: #991b1b;
         font-size: 12px;
         line-height: 16px;
         padding: 1px 6px;
         cursor: pointer;
       }
-      [data-codex-delete-row="true"]:hover .${buttonClass} { opacity: 1; }
-      [data-codex-delete-row="true"].codex-archive-confirm-visible .${buttonClass} { right: 66px; }
+      .${buttonClass} {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+      .${exportButtonClass} {
+        border-color: #93c5fd;
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
+      [data-codex-delete-row="true"]:hover .${actionGroupClass} { opacity: 1; }
+      [data-codex-delete-row="true"].codex-archive-confirm-visible .${actionGroupClass} { right: 66px; }
       .codex-archive-delete-all {
         border: 1px solid #ef4444;
         border-radius: 7px;
@@ -215,7 +232,7 @@
   }
 
   function defaultCodexPlusSettings() {
-    return { pluginEntryUnlock: true, forcePluginInstall: true, sessionDelete: true, nativeMenuPlacement: true };
+    return { pluginEntryUnlock: true, forcePluginInstall: true, sessionDelete: true, markdownExport: true, nativeMenuPlacement: true };
   }
 
   function codexPlusSettings() {
@@ -263,6 +280,10 @@
           <div class="codex-plus-row">
             <div><div class="codex-plus-row-title">会话删除</div><div class="codex-plus-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
             <button type="button" class="codex-plus-toggle" data-codex-plus-setting="sessionDelete"><span></span></button>
+          </div>
+          <div class="codex-plus-row">
+            <div><div class="codex-plus-row-title">Markdown 导出</div><div class="codex-plus-row-description">在会话列表显示导出按钮，下载带时间戳的 Markdown 记录。</div></div>
+            <button type="button" class="codex-plus-toggle" data-codex-plus-setting="markdownExport"><span></span></button>
           </div>
           <div class="codex-plus-row">
             <div><div class="codex-plus-row-title">原生菜单栏位置</div><div class="codex-plus-row-description">把 Codex++ 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
@@ -525,15 +546,40 @@
     const fallbackId = row.getAttribute("data-session-id") || row.getAttribute("data-testid") || "";
     const sessionId = codexThreadId || (idMatch && idMatch[1]) || fallbackId;
     const titleNode = row.querySelector(selectors.threadTitle);
-    const title = ((titleNode || row).textContent || "Untitled session").replace("删除", "").trim().slice(0, 160);
+    const title = ((titleNode || row).textContent || "Untitled session").replace("删除", "").replace("导出", "").trim().slice(0, 160);
     return { session_id: sessionId, title };
   }
 
-  async function postJson(path, payload) {
-    if (!window.__codexSessionDeleteBridge) {
+  function bridgeReady() {
+    return typeof window.__codexSessionDeleteBridge === "function" && typeof window[bindingName] === "function";
+  }
+
+  async function postJsonViaHttp(path, payload) {
+    if (!helperBase || !helperToken) {
       return { status: "failed", message: "删除桥接不可用，请重启启动器" };
     }
-    return await window.__codexSessionDeleteBridge(path, payload);
+    const response = await fetch(`${helperBase}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Codex-Session-Delete-Token": helperToken,
+      },
+      body: JSON.stringify(payload || {}),
+    });
+    const result = await response.json().catch(() => ({ status: "failed", message: `HTTP ${response.status}` }));
+    if (!response.ok) return result;
+    return result;
+  }
+
+  async function postJson(path, payload) {
+    if (bridgeReady()) {
+      try {
+        return await window.__codexSessionDeleteBridge(path, payload);
+      } catch (error) {
+        if (!/is not a function/i.test(String(error?.message || error || ""))) throw error;
+      }
+    }
+    return await postJsonViaHttp(path, payload);
   }
 
   function showToast(message, undoToken) {
@@ -553,6 +599,19 @@
     }
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 10000);
+  }
+
+  function downloadMarkdown(filename, markdown) {
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename || "codex-export.md";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function escapeHtml(value) {
@@ -643,7 +702,7 @@
         const rect = button.getBoundingClientRect();
         const label = button.getAttribute("aria-label") || "";
         const text = (button.textContent || "").trim();
-        if (button.classList.contains(buttonClass) || label === "归档对话" || label === "置顶对话") return false;
+        if (button.classList.contains(buttonClass) || button.classList.contains(exportButtonClass) || label === "归档对话" || label === "置顶对话") return false;
         return text === "确认" || (text.length > 0 && rect.width > 0 && rect.width <= 36 && rect.x > row.getBoundingClientRect().right - 50);
       });
       row.classList.toggle("codex-archive-confirm-visible", hasArchiveConfirm);
@@ -668,6 +727,22 @@
     });
   }
 
+  function openExportForRef(ref, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    postJson("/export-markdown", ref).then((result) => {
+      if (result.status === "exported" && result.filename && result.markdown) {
+        downloadMarkdown(result.filename, result.markdown);
+        showToast(result.message || "导出成功", null);
+      } else {
+        showToast(result.message || "导出失败", null);
+      }
+    }).catch((error) => {
+      showToast(String(error?.message || error || "导出失败"), null);
+    });
+  }
+
   function installDeleteButtonEventDelegation() {
     document.removeEventListener("pointerup", window.__codexSessionDeleteDocumentDeleteHandler, true);
     document.removeEventListener("click", window.__codexSessionDeleteDocumentDeleteHandler, true);
@@ -684,44 +759,86 @@
     document.addEventListener("click", handler, true);
   }
 
+  function installExportButtonEventDelegation() {
+    document.removeEventListener("pointerup", window.__codexSessionDeleteDocumentExportHandler, true);
+    document.removeEventListener("click", window.__codexSessionDeleteDocumentExportHandler, true);
+    const handler = (event) => {
+      const button = event.target?.closest?.(`.${exportButtonClass}`);
+      const row = button?.closest?.("[data-app-action-sidebar-thread-id]");
+      if (!button || !row) return;
+      const ref = sessionRefFromRow(row);
+      if (!ref.session_id) return;
+      openExportForRef(ref, event);
+    };
+    window.__codexSessionDeleteDocumentExportHandler = handler;
+    document.addEventListener("pointerup", handler, true);
+    document.addEventListener("click", handler, true);
+  }
+
+  function actionGroupForRow(row) {
+    const existing = Array.from(row.querySelectorAll(`.${actionGroupClass}`));
+    const current = existing.find((node) => node.dataset.codexDeleteVersion === codexDeleteVersion);
+    existing.forEach((node) => {
+      if (node !== current) node.remove();
+    });
+    if (current) {
+      current.replaceChildren();
+      return current;
+    }
+    const group = document.createElement("div");
+    group.className = actionGroupClass;
+    group.dataset.codexDeleteVersion = codexDeleteVersion;
+    row.appendChild(group);
+    return group;
+  }
+
   function attachButton(row) {
-    if (!codexPlusSettings().sessionDelete) return;
-    const existingDeleteButtons = Array.from(row.querySelectorAll(`.${buttonClass}`));
-    if (existingDeleteButtons.length === 1 && existingDeleteButtons[0].dataset.codexDeleteVersion === codexDeleteVersion) return;
+    const settings = codexPlusSettings();
+    if (!settings.sessionDelete && !settings.markdownExport) {
+      row.querySelectorAll(`.${actionGroupClass}`).forEach((node) => node.remove());
+      return;
+    }
+    const existingDeleteButtons = Array.from(row.querySelectorAll(`.${buttonClass}, .${exportButtonClass}`));
     existingDeleteButtons.forEach((button) => button.remove());
     row.dataset.codexDeleteRow = "false";
     const ref = sessionRefFromRow(row);
     if (!ref.session_id) return;
     row.dataset.codexDeleteRow = "true";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = buttonClass;
-    button.dataset.codexDeleteVersion = codexDeleteVersion;
-    button.textContent = "删除";
+    const group = actionGroupForRow(row);
     const stopDeleteButtonEvent = (event) => {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
-      releaseDeleteFocus(row, button);
+      releaseDeleteFocus(row, event.currentTarget);
     };
-    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
-      button.addEventListener(eventName, stopDeleteButtonEvent, true);
-    });
-    const openDeleteConfirm = (event) => openDeleteConfirmForRow(row, button, ref, event);
-    button.addEventListener("pointerup", openDeleteConfirm, true);
-    button.addEventListener("click", openDeleteConfirm, true);
-    row.appendChild(button);
-    const refreshDeleteButton = (originalButton) => {
-      if (!originalButton.isConnected) return;
-      const replacement = originalButton.cloneNode(true);
+    if (settings.markdownExport) {
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = exportButtonClass;
+      exportButton.dataset.codexExportVersion = codexExportVersion;
+      exportButton.textContent = "导出";
       ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
-        replacement.addEventListener(eventName, stopDeleteButtonEvent, true);
+        exportButton.addEventListener(eventName, stopDeleteButtonEvent, true);
       });
-      replacement.addEventListener("pointerup", openDeleteConfirm, true);
-      replacement.addEventListener("click", openDeleteConfirm, true);
-      originalButton.replaceWith(replacement);
-    };
-    setTimeout(() => refreshDeleteButton(button), 0);
+      const exportCurrent = (event) => openExportForRef(ref, event);
+      exportButton.addEventListener("pointerup", exportCurrent, true);
+      exportButton.addEventListener("click", exportCurrent, true);
+      group.appendChild(exportButton);
+    }
+    if (settings.sessionDelete) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = buttonClass;
+      button.dataset.codexDeleteVersion = codexDeleteVersion;
+      button.textContent = "删除";
+      ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+        button.addEventListener(eventName, stopDeleteButtonEvent, true);
+      });
+      const openDeleteConfirm = (event) => openDeleteConfirmForRow(row, button, ref, event);
+      button.addEventListener("pointerup", openDeleteConfirm, true);
+      button.addEventListener("click", openDeleteConfirm, true);
+      group.appendChild(button);
+    }
   }
 
   function tryAttachButton(row) {
@@ -764,6 +881,7 @@
     const title = ((titleNode || row).textContent || "Untitled session")
       .replace("取消归档", "")
       .replace("删除", "")
+      .replace("导出", "")
       .replace(/\d{4}年\d{1,2}月\d{1,2}日.*$/, "")
       .replace(/\s+·\s+.*$/, "")
       .trim()
@@ -811,37 +929,70 @@
   }
 
   function attachArchivedPageDeleteButton(row) {
-    if (!codexPlusSettings().sessionDelete) return;
-    if (row.dataset.codexArchiveDeleteRow === "true") return;
-    row.dataset.codexArchiveDeleteRow = "true";
+    const settings = codexPlusSettings();
+    row.querySelectorAll("[data-codex-archive-delete-action], [data-codex-archive-export-action]").forEach((node) => node.remove());
+    row.dataset.codexArchiveDeleteRow = "false";
+    row.dataset.codexArchiveExportRow = "false";
+    if (!settings.sessionDelete && !settings.markdownExport) return;
     const unarchiveButton = Array.from(row.querySelectorAll("button")).find((button) => (button.textContent || "").trim() === "取消归档");
     if (!unarchiveButton) return;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "codex-archive-delete-all";
-    button.textContent = "删除";
-    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
-      button.addEventListener(eventName, stopArchivedButtonEvent, true);
-    });
-    button.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation?.();
-      const ref = await resolveArchivedThread(row);
-      if (!ref.session_id) {
-        showToast("删除失败：未找到归档会话 ID", null);
-        return;
-      }
-      if (!(await confirmDelete(ref.title))) return;
-      const result = await postJson("/delete", ref);
-      if (result.status === "server_deleted" || result.status === "local_deleted") {
-        row.remove();
-        showToast(result.message || "删除成功", result.undo_token);
-      } else {
-        showToast(result.message || "删除失败", null);
-      }
-    }, true);
-    unarchiveButton.insertAdjacentElement("afterend", button);
+    const insertAfter = (button) => unarchiveButton.insertAdjacentElement("afterend", button);
+    if (settings.sessionDelete) {
+      row.dataset.codexArchiveDeleteRow = "true";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "codex-archive-delete-all";
+      button.dataset.codexArchiveDeleteAction = "true";
+      button.textContent = "删除";
+      ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+        button.addEventListener(eventName, stopArchivedButtonEvent, true);
+      });
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        const ref = await resolveArchivedThread(row);
+        if (!ref.session_id) {
+          showToast("删除失败：未找到归档会话 ID", null);
+          return;
+        }
+        if (!(await confirmDelete(ref.title))) return;
+        const result = await postJson("/delete", ref);
+        if (result.status === "server_deleted" || result.status === "local_deleted") {
+          row.remove();
+          showToast(result.message || "删除成功", result.undo_token);
+        } else {
+          showToast(result.message || "删除失败", null);
+        }
+      }, true);
+      insertAfter(button);
+    }
+    if (settings.markdownExport) {
+      row.dataset.codexArchiveExportRow = "true";
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = "codex-archive-delete-all";
+      exportButton.dataset.codexArchiveExportAction = "true";
+      exportButton.textContent = "导出";
+      exportButton.style.borderColor = "#93c5fd";
+      exportButton.style.background = "#dbeafe";
+      exportButton.style.color = "#1d4ed8";
+      ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+        exportButton.addEventListener(eventName, stopArchivedButtonEvent, true);
+      });
+      exportButton.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        const ref = await resolveArchivedThread(row);
+        if (!ref.session_id) {
+          showToast("导出失败：未找到归档会话 ID", null);
+          return;
+        }
+        openExportForRef(ref, event);
+      }, true);
+      insertAfter(exportButton);
+    }
   }
 
   function installArchivedDeleteAllButton() {
@@ -899,6 +1050,7 @@
     installStyle();
     installCodexPlusMenu();
     installDeleteButtonEventDelegation();
+    installExportButtonEventDelegation();
   }
 
   function scanDeferred() {

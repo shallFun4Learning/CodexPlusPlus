@@ -4,7 +4,7 @@ import urllib.error
 import urllib.request
 
 from codex_session_delete.helper_server import HelperServer
-from codex_session_delete.models import DeleteResult, DeleteStatus, SessionRef
+from codex_session_delete.models import DeleteResult, DeleteStatus, ExportResult, ExportStatus, SessionRef
 
 
 class FakeDeleteService:
@@ -24,6 +24,21 @@ class FakeDeleteService:
     def find_archived_thread_by_title(self, title: str):
         self.archived_title_queries.append(title)
         return SessionRef(session_id="archived-t1", title=title)
+
+
+class FakeExportService:
+    def __init__(self):
+        self.exported = []
+
+    def export(self, session: SessionRef):
+        self.exported.append(session)
+        return ExportResult(
+            ExportStatus.EXPORTED,
+            session.session_id,
+            "Exported markdown",
+            filename="thread.md",
+            markdown="# Thread\n",
+        )
 
 
 def post_json(url, payload, headers=None):
@@ -68,6 +83,24 @@ def test_helper_server_resolves_archived_thread_by_title():
 
     assert resolved == {"session_id": "archived-t1", "title": "Codex Thread"}
     assert service.archived_title_queries == ["Codex Thread"]
+
+
+def test_helper_server_exports_markdown():
+    service = FakeDeleteService()
+    export_service = FakeExportService()
+    server = HelperServer("127.0.0.1", 0, service, export_service=export_service, allow_http_mutation=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        exported = post_json(base + "/export-markdown", {"session_id": "s1", "title": "First"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert exported["status"] == "exported"
+    assert exported["filename"] == "thread.md"
+    assert export_service.exported[0].session_id == "s1"
 
 
 def test_helper_server_rejects_http_mutation_by_default():

@@ -32,6 +32,7 @@ Codex++ 是一个面向 Codex App 的外部增强启动器。它不修改 Codex 
 当前功能：
 
 - 在会话列表悬停显示“删除”按钮
+- 在会话列表悬停显示“导出”按钮，导出带时间戳的 Markdown
 - 删除前确认，支持撤销
 - 优先尝试服务端删除；不可用时删除本地 Codex SQLite 会话记录
 - 在顶部菜单栏加入 `Codex++` 菜单
@@ -39,6 +40,7 @@ Codex++ 是一个面向 Codex App 的外部增强启动器。它不修改 Codex 
   - 插件选项解锁
   - 特殊插件强制安装
   - 会话删除
+  - Markdown 导出
 - 支持 Windows 快捷方式安装/卸载
 - 支持 macOS 生成 `/Applications/Codex++.app`
 - 支持基于 GitHub Release 检查和更新 Codex++
@@ -55,7 +57,7 @@ API Key 登录模式下，Codex 原生插件入口会提示需要登录 ChatGPT�
 
 ## 解决效果
 
-Codex++ 启动后会解锁插件入口，并在会话列表悬停时显示删除按钮：
+Codex++ 启动后会解锁插件入口，并在会话列表悬停时显示删除和导出按钮：
 
 ![Codex++ 解锁插件入口并添加删除按钮](docs/images/solution-plugin-and-delete.png)
 
@@ -84,6 +86,8 @@ Codex++ 使用外部启动方式运行 Codex：
 3. 通过 CDP 注入 `renderer-inject.js`。
 4. 渲染端通过 CDP bridge 调用本地删除服务；默认不开放 HTTP 删除/撤销入口，避免本机其他页面误触发删除类操作。
 5. 启动 Codex 时会继承现有 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`；如果这些环境变量未设置，会自动探测常见本地代理端口（如 `127.0.0.1:7897`），帮助 Codex 加载需要访问 GitHub 的技能资源。
+
+Markdown 导出同样通过本地 bridge 调用完成，数据来源是 Codex 本地 `state_5.sqlite` 和对应的 `rollout.jsonl`。当前导出范围仅包含 user/assistant 正文与图片占位，不包含工具调用、推理轨迹或 developer/system 内容；每条消息默认附本地时间秒级时间戳。
 
 这种方式不会修改 Codex 的 `app.asar`，也不需要往 Codex 安装目录写 DLL。
 

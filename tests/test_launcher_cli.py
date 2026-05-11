@@ -191,8 +191,8 @@ def test_launch_retries_injection_until_codex_page_is_ready(monkeypatch, tmp_pat
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
     monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: None)
 
-    def inject_after_retry(*args):
-        attempts.append(args)
+    def inject_after_retry(*args, **kwargs):
+        attempts.append((args, kwargs))
         if len(attempts) == 1:
             raise RuntimeError("CDP page not ready")
         return {"result": {}}
