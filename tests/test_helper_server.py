@@ -35,14 +35,33 @@ class FakeDeleteService:
     def thread_sort_keys(self, sessions: list[SessionRef]):
         return {"status": "ok", "sort_keys": [{"session_id": session.session_id, "updated_at_ms": index + 1} for index, session in enumerate(sessions)]}
 
-
 class FakeExportService:
     def __init__(self):
         self.exported = []
+        self.chosen_directories = []
+        self.exported_projects = []
 
     def export(self, session: SessionRef):
         self.exported.append(session)
         return ExportResult(ExportStatus.EXPORTED, session.session_id, "Exported", filename="thread.md", markdown="# Thread\n")
+
+    def choose_output_directory(self, initial_dir: str | None = None):
+        self.chosen_directories.append(initial_dir)
+        return {"status": "selected", "directory": "/Downloads", "message": "Directory selected"}
+
+    def export_project(self, target_cwd: str, project_label: str | None = None, download_dir: str | None = None):
+        self.exported_projects.append((target_cwd, project_label, download_dir))
+        return {
+            "status": "exported",
+            "target_cwd": target_cwd,
+            "project_label": project_label or "",
+            "output_dir": f"{download_dir or '/Downloads'}/{project_label or 'project'}",
+            "exported_count": 1,
+            "failed_count": 0,
+            "message": "Project exported",
+            "files": [{"filename": "thread.md", "path": f"{download_dir or '/Downloads'}/{project_label or 'project'}/thread.md"}],
+            "failures": [],
+        }
 
 
 def post_json(url, payload, headers=None):
@@ -105,6 +124,41 @@ def test_helper_server_exports_markdown_when_authorized():
     assert exported["status"] == "exported"
     assert exported["filename"] == "thread.md"
     assert export_service.exported[0].session_id == "s1"
+
+
+def test_helper_server_exports_project_markdown_when_authorized():
+    delete_service = FakeDeleteService()
+    export_service = FakeExportService()
+    server = HelperServer("127.0.0.1", 0, delete_service, export_service, allow_http_mutation=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        exported = post_json(base + "/export-project-markdown", {"target_cwd": "/project/a", "project_label": "a", "download_dir": "/Exports"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert exported["status"] == "exported"
+    assert exported["output_dir"] == "/Exports/a"
+    assert export_service.exported_projects == [("/project/a", "a", "/Exports")]
+
+
+def test_helper_server_chooses_export_directory_without_mutation_token():
+    delete_service = FakeDeleteService()
+    export_service = FakeExportService()
+    server = HelperServer("127.0.0.1", 0, delete_service, export_service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        selected = post_json(base + "/choose-export-directory", {"initial_dir": "/project/a"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert selected == {"status": "selected", "directory": "/Downloads", "message": "Directory selected"}
+    assert export_service.chosen_directories == ["/project/a"]
 
 
 def test_helper_server_rejects_http_mutation_by_default():

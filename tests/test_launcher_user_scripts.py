@@ -14,10 +14,34 @@ class FakeDeleteService:
     def find_archived_thread_by_title(self, title):
         return None
 
+    def move_thread_workspace(self, session, target_cwd):
+        raise AssertionError("move_thread_workspace should not be called")
+
+    def thread_sort_key(self, session):
+        raise AssertionError("thread_sort_key should not be called")
+
+    def thread_sort_keys(self, sessions):
+        raise AssertionError("thread_sort_keys should not be called")
 
 class FakeExportService:
     def export(self, session):
         return ExportResult(ExportStatus.EXPORTED, session.session_id, "Exported", filename="thread.md", markdown="# Thread\n")
+
+    def choose_output_directory(self, initial_dir=None):
+        return {"status": "selected", "directory": "/Exports", "message": "Directory selected"}
+
+    def export_project(self, target_cwd, project_label=None, download_dir=None):
+        return {
+            "status": "exported",
+            "target_cwd": target_cwd,
+            "project_label": project_label or "",
+            "output_dir": f"{download_dir or '/Downloads'}/{project_label or 'project'}",
+            "exported_count": 1,
+            "failed_count": 0,
+            "message": "Project exported",
+            "files": [{"filename": "thread.md", "path": f"{download_dir or '/Downloads'}/{project_label or 'project'}/thread.md"}],
+            "failures": [],
+        }
 
 
 class FakeRuntime:
@@ -115,3 +139,33 @@ def test_handle_bridge_request_exports_markdown(tmp_path):
     assert exported["status"] == "exported"
     assert exported["filename"] == "thread.md"
 
+
+def test_handle_bridge_request_exports_project_markdown(tmp_path):
+    manager = UserScriptManager(tmp_path / "builtin", tmp_path / "user", tmp_path / "config.json")
+    runtime = FakeRuntime(manager)
+
+    exported = handle_bridge_request(
+        FakeDeleteService(),
+        FakeExportService(),
+        "/export-project-markdown",
+        {"target_cwd": "/project/a", "project_label": "a", "download_dir": "/Exports"},
+        runtime,
+    )
+
+    assert exported["status"] == "exported"
+    assert exported["output_dir"] == "/Exports/a"
+
+
+def test_handle_bridge_request_chooses_export_directory(tmp_path):
+    manager = UserScriptManager(tmp_path / "builtin", tmp_path / "user", tmp_path / "config.json")
+    runtime = FakeRuntime(manager)
+
+    selected = handle_bridge_request(
+        FakeDeleteService(),
+        FakeExportService(),
+        "/choose-export-directory",
+        {"initial_dir": "/project/a"},
+        runtime,
+    )
+
+    assert selected == {"status": "selected", "directory": "/Exports", "message": "Directory selected"}

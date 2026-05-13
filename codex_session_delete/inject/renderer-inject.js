@@ -2,10 +2,12 @@
   const helperBase = window.__CODEX_SESSION_DELETE_HELPER__ || "http://127.0.0.1:57321";
   const buttonClass = "codex-delete-button";
   const exportButtonClass = "codex-export-button";
+  const projectExportButtonClass = "codex-project-export-button";
   const projectMoveButtonClass = "codex-project-move-button";
   const projectMoveOverlayClass = "codex-project-move-overlay";
   const actionButtonClass = "codex-session-action-button";
   const actionGroupClass = "codex-session-actions";
+  const projectActionGroupClass = "codex-project-actions";
   const timelineClass = "codex-conversation-timeline";
   const timelineTrackClass = "codex-conversation-timeline-track";
   const timelineMarkerClass = "codex-conversation-timeline-marker";
@@ -20,11 +22,12 @@
   const chatsSortRefreshIntervalMs = 1500;
   const chatsSortDbRefreshIntervalMs = 5000;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "7";
+  const codexDeleteStyleVersion = "8";
   const codexPlusMenuId = "codex-plus-menu";
   const codexPlusMenuFloatingClass = "codex-plus-menu-floating";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
+  const codexProjectExportVersion = "1";
   const codexProjectMoveVersion = "1";
   const codexActionGroupVersion = "2";
   const codexArchiveRowActionsVersion = "1";
@@ -68,6 +71,17 @@
         align-items: center;
         gap: 6px;
       }
+      .${projectActionGroupClass} {
+        position: absolute;
+        right: 28px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 20;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        opacity: 0;
+      }
       .${actionButtonClass},
       .codex-archive-row-button {
         border: 1px solid #ef4444;
@@ -92,11 +106,14 @@
         color: #991b1b;
       }
       .${exportButtonClass},
+      .${projectExportButtonClass},
       .codex-archive-row-button.${exportButtonClass} {
         border-color: #93c5fd;
         background: #dbeafe;
         color: #1d4ed8;
       }
+      [data-app-action-sidebar-project-row]:hover .${projectActionGroupClass},
+      [data-app-action-sidebar-project-row]:focus-within .${projectActionGroupClass} { opacity: 1; }
       .${projectMoveButtonClass} {
         border-color: #10a37f;
         background: #d1fae5;
@@ -1071,6 +1088,15 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  async function chooseProjectExportDirectory(target) {
+    const result = await postJson("/choose-export-directory", {
+      initial_dir: target?.path || "",
+    });
+    if (result?.status === "selected" && result.directory) return result.directory;
+    if (result?.status === "cancelled") return null;
+    throw new Error(result?.message || "选择导出位置失败");
+  }
+
   let codexStateApiPromise = null;
   let chatsSortInFlight = false;
   let chatsSortSignature = "";
@@ -1214,6 +1240,14 @@
     return { kind: target.kind, label: target.label, description: target.description, path: target.path, normalizedPath: target.normalizedPath || normalizeWorkspacePath(target.path) };
   }
 
+  function projectTargetFromRow(projectRow) {
+    const path = projectRow?.getAttribute?.("data-app-action-sidebar-project-id") || "";
+    const normalizedPath = normalizeWorkspacePath(path);
+    if (!normalizedPath) return null;
+    const label = projectRow.getAttribute("data-app-action-sidebar-project-label") || projectRow.getAttribute("aria-label") || displayProjectName(path);
+    return { kind: "project", label: String(label || displayProjectName(path)), description: path, path, normalizedPath };
+  }
+
   function projectMoveTargets() {
     return [
       { kind: "projectless", label: "普通对话", description: "不属于任何项目", path: "", normalizedPath: "" },
@@ -1329,6 +1363,14 @@
     if (!projectItem) return null;
     if (projectItem.matches?.("[data-app-action-sidebar-project-row]")) return projectItem;
     return projectItem.querySelector?.("[data-app-action-sidebar-project-row]") || null;
+  }
+
+  function projectActionGroupFromRow(projectRow) {
+    return projectRow?.querySelector?.(`.${projectActionGroupClass}`) || null;
+  }
+
+  function removeProjectActionGroups(projectRow) {
+    projectRow?.querySelectorAll?.(`.${projectActionGroupClass}`)?.forEach((group) => group.remove());
   }
 
   function targetPath(target) {
@@ -2033,6 +2075,38 @@
     showToast(result.message || "导出失败", null);
   }
 
+  async function exportProjectMarkdown(projectRow, button, target) {
+    if (!target?.path) {
+      showToast("批量导出失败：未找到项目路径", null);
+      return;
+    }
+    button.disabled = true;
+    const originalText = button.textContent;
+    button.textContent = "导出中";
+    try {
+      const downloadDir = await chooseProjectExportDirectory(target);
+      if (!downloadDir) {
+        showToast("已取消批量导出", null);
+        return;
+      }
+      const result = await postJson("/export-project-markdown", {
+        target_cwd: target.path,
+        project_label: target.label || displayProjectName(target.path),
+        download_dir: downloadDir,
+      });
+      if (result?.status === "exported" || result?.status === "partial") {
+        showToast(result.message || `项目“${target.label}”导出完成`, null);
+      } else {
+        showToast(result?.message || "批量导出失败", null);
+      }
+    } catch (error) {
+      showToast(`批量导出失败：${error?.message || error}`, null);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText || "批量导出";
+    }
+  }
+
   function sortStateFromMoveResult(result, ref, row) {
     const trustedSortMs = timestampMsFromPayload(result);
     return { sortMs: trustedSortMs || rowSortMs(row, ref), sortMsTrusted: !!trustedSortMs };
@@ -2174,6 +2248,51 @@
     const replacement = originalButton.cloneNode(true);
     installActionButtonEvents(row, replacement, onActivate);
     originalButton.replaceWith(replacement);
+  }
+
+  function attachProjectExportButton(projectRow) {
+    const settings = codexPlusSettings();
+    const existingGroup = projectActionGroupFromRow(projectRow);
+    const existingButton = existingGroup?.querySelector(`.${projectExportButtonClass}`);
+    if (
+      settings.markdownExport &&
+      existingGroup?.dataset.codexProjectActionGroupVersion === codexProjectExportVersion &&
+      existingButton?.dataset.codexProjectExportVersion === codexProjectExportVersion
+    ) return;
+    removeProjectActionGroups(projectRow);
+    projectRow.dataset.codexProjectExportRow = "false";
+    if (!settings.markdownExport) return;
+    const target = projectTargetFromRow(projectRow);
+    if (!target?.path) return;
+    if (window.getComputedStyle(projectRow).position === "static") {
+      projectRow.style.position = "relative";
+    }
+    const group = document.createElement("span");
+    group.className = projectActionGroupClass;
+    group.dataset.codexProjectActionGroupVersion = codexProjectExportVersion;
+    const exportButton = document.createElement("button");
+    exportButton.type = "button";
+    exportButton.className = `${actionButtonClass} ${projectExportButtonClass}`;
+    exportButton.dataset.codexProjectExportVersion = codexProjectExportVersion;
+    exportButton.textContent = "批量导出";
+    const openExport = async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      await exportProjectMarkdown(projectRow, exportButton, target);
+    };
+    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+      exportButton.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+      }, true);
+    });
+    exportButton.addEventListener("pointerup", openExport, true);
+    exportButton.addEventListener("click", openExport, true);
+    group.appendChild(exportButton);
+    projectRow.appendChild(group);
+    projectRow.dataset.codexProjectExportRow = "true";
   }
 
   function attachButton(row) {
@@ -2579,6 +2698,9 @@
   function scanDeferred() {
     enablePluginEntry();
     unblockPluginInstallButtons();
+    nativeProjectTargets().forEach((target) => {
+      if (target?.row) attachProjectExportButton(target.row);
+    });
     sessionRows().forEach(tryAttachButton);
     updateDeleteButtonOffsets();
     scheduleProjectMoveProjection();

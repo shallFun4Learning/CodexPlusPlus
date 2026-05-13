@@ -20,6 +20,8 @@ class DeleteService(Protocol):
 
 class ExportService(Protocol):
     def export(self, session: SessionRef) -> ExportResult: ...
+    def choose_output_directory(self, initial_dir: str | None = None) -> dict[str, object]: ...
+    def export_project(self, target_cwd: str, project_label: str | None = None) -> dict[str, object]: ...
 
 
 class HelperServer(ThreadingHTTPServer):
@@ -62,7 +64,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             payload = self._read_json()
-            if self.path in {"/delete", "/undo", "/archived-thread", "/export-markdown"} and not self._is_mutation_authorized():
+            if self.path in {"/delete", "/undo", "/archived-thread", "/export-markdown", "/export-project-markdown"} and not self._is_mutation_authorized():
                 self._send_json({"error": "forbidden"}, status=403)
                 return
             if self.path == "/delete":
@@ -82,6 +84,48 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
                 self._send_json(self.server.export_service.export(session).to_dict())
+                return
+            if self.path == "/choose-export-directory":
+                if self.server.export_service is None:
+                    self._send_json(
+                        {
+                            "status": "failed",
+                            "directory": "",
+                            "message": "Markdown 导出不可用",
+                        },
+                        status=400,
+                    )
+                    return
+                self._send_json(
+                    self.server.export_service.choose_output_directory(
+                        str(payload.get("initial_dir", "")) or None,
+                    )
+                )
+                return
+            if self.path == "/export-project-markdown":
+                if self.server.export_service is None:
+                    self._send_json(
+                        {
+                            "status": "failed",
+                            "target_cwd": str(payload.get("target_cwd", "")),
+                            "project_label": str(payload.get("project_label", "")),
+                            "output_dir": "",
+                            "exported_count": 0,
+                            "failed_count": 0,
+                            "message": "Markdown 导出不可用",
+                            "files": [],
+                            "failures": [],
+                        },
+                        status=400,
+                    )
+                    return
+                self._send_json(
+                    self.server.export_service.export_project(
+                        str(payload.get("target_cwd", "")),
+                        str(payload.get("project_label", "")) or None,
+                        str(payload.get("download_dir", "")) or None,
+                    )
+                )
                 return
             if self.path == "/archived-thread":
                 session = self.server.service.find_archived_thread_by_title(str(payload.get("title", "")))
@@ -110,6 +154,32 @@ class _Handler(BaseHTTPRequestHandler):
             if self.path == "/export-markdown":
                 result = ExportResult(ExportStatus.FAILED, session_id, str(exc))
                 self._send_json(result.to_dict(), status=400)
+                return
+            if self.path == "/export-project-markdown":
+                self._send_json(
+                    {
+                        "status": "failed",
+                        "target_cwd": str(payload.get("target_cwd", "")) if "payload" in locals() else "",
+                        "project_label": str(payload.get("project_label", "")) if "payload" in locals() else "",
+                        "output_dir": "",
+                        "exported_count": 0,
+                        "failed_count": 0,
+                        "message": str(exc),
+                        "files": [],
+                        "failures": [],
+                    },
+                    status=400,
+                )
+                return
+            if self.path == "/choose-export-directory":
+                self._send_json(
+                    {
+                        "status": "failed",
+                        "directory": "",
+                        "message": str(exc),
+                    },
+                    status=400,
+                )
                 return
             result = DeleteResult(DeleteStatus.FAILED, session_id, str(exc))
             self._send_json(result.to_dict(), status=400)

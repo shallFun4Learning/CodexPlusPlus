@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 
 from codex_session_delete.markdown_exporter import MarkdownExportService
 from codex_session_delete.models import ExportStatus, SessionRef
@@ -180,3 +181,87 @@ def test_markdown_exporter_fails_when_thread_missing_rollout_missing_or_no_messa
     assert missing_thread.status == ExportStatus.FAILED
     assert missing_rollout.status == ExportStatus.FAILED
     assert no_messages.status == ExportStatus.FAILED
+
+
+def test_markdown_exporter_exports_project_into_named_folder(tmp_path, monkeypatch):
+    db_path = tmp_path / "state_5.sqlite"
+    first_rollout = tmp_path / "rollout-1.jsonl"
+    second_rollout = tmp_path / "rollout-2.jsonl"
+    first_rollout.write_text(
+        '{"type":"response_item","timestamp":"2026-05-10T13:12:06Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}}\n',
+        encoding="utf-8",
+    )
+    second_rollout.write_text(
+        '{"type":"response_item","timestamp":"2026-05-11T13:12:06Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"World"}]}}\n',
+        encoding="utf-8",
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, title TEXT, cwd TEXT, archived INTEGER, archived_at INTEGER, updated_at INTEGER, updated_at_ms INTEGER)")
+        db.execute(
+            "INSERT INTO threads (id, rollout_path, title, cwd, archived, archived_at, updated_at, updated_at_ms) VALUES ('t1', ?, 'First Thread', 'C:/workspace/demo', 0, NULL, 100, 100000)",
+            (str(first_rollout),),
+        )
+        db.execute(
+            "INSERT INTO threads (id, rollout_path, title, cwd, archived, archived_at, updated_at, updated_at_ms) VALUES ('t2', ?, 'Second Thread', '\\\\?\\C:\\workspace\\demo\\', 0, NULL, 200, 200000)",
+            (str(second_rollout),),
+        )
+        db.execute(
+            "INSERT INTO threads (id, rollout_path, title, cwd, archived, archived_at, updated_at, updated_at_ms) VALUES ('t3', ?, 'Archived Thread', 'C:/workspace/demo', 1, 1, 300, 300000)",
+            (str(second_rollout),),
+        )
+    downloads_dir = tmp_path / "Downloads"
+    service = MarkdownExportService(db_path)
+
+    result = service.export_project("C:/workspace/demo", "demo", download_dir=downloads_dir)
+
+    assert result["status"] == "exported"
+    assert result["output_dir"] == str(downloads_dir / "demo")
+    assert result["exported_count"] == 2
+    assert result["failed_count"] == 0
+    assert [item["filename"] for item in result["files"]] == ["Second Thread-t2.md", "First Thread-t1.md"]
+    assert (downloads_dir / "demo" / "Second Thread-t2.md").read_text(encoding="utf-8").startswith("# Second Thread")
+    assert (downloads_dir / "demo" / "First Thread-t1.md").read_text(encoding="utf-8").startswith("# First Thread")
+
+
+def test_markdown_exporter_export_project_reports_missing_threads(tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, title TEXT, cwd TEXT, archived INTEGER)")
+    service = MarkdownExportService(db_path)
+
+    result = service.export_project("C:/workspace/demo", "demo", download_dir=tmp_path / "Downloads")
+
+    assert result["status"] == "failed"
+    assert result["message"] == "该项目下没有可导出的会话"
+    assert result["exported_count"] == 0
+
+
+def test_markdown_exporter_choose_output_directory_returns_selected_path(tmp_path, monkeypatch):
+    db_path = tmp_path / "state_5.sqlite"
+    selected_dir = tmp_path / "Exports"
+    service = MarkdownExportService(db_path)
+
+    monkeypatch.setattr(service, "_choose_output_directory", lambda initial_dir: selected_dir)
+
+    result = service.choose_output_directory()
+
+    assert result == {
+        "status": "selected",
+        "directory": str(selected_dir),
+        "message": f"已选择导出位置：{selected_dir}",
+    }
+
+
+def test_markdown_exporter_choose_output_directory_reports_cancelled(tmp_path, monkeypatch):
+    db_path = tmp_path / "state_5.sqlite"
+    service = MarkdownExportService(db_path)
+
+    monkeypatch.setattr(service, "_choose_output_directory", lambda initial_dir: None)
+
+    result = service.choose_output_directory()
+
+    assert result == {
+        "status": "cancelled",
+        "directory": "",
+        "message": "已取消选择导出位置",
+    }

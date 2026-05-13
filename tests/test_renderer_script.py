@@ -291,7 +291,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"7\"" in text
+    assert "codexDeleteStyleVersion = \"8\"" in text
     assert "right: 66px" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -372,7 +372,28 @@ def test_renderer_script_uses_bridge_only_helper_calls():
     assert "postJson(\"/undo\"" in text
     assert "postJson(\"/archived-thread\"" in text
     assert "postJson(\"/export-markdown\"" in text
+    assert "postJson(\"/choose-export-directory\"" in text
+    assert "postJson(\"/export-project-markdown\"" in text
     assert "Blob([markdown]" in text
+
+
+def test_renderer_script_project_export_chooses_directory_before_exporting():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    assert "async function chooseProjectExportDirectory" in text
+    assert "initial_dir: target?.path || \"\"" in text
+    assert "const downloadDir = await chooseProjectExportDirectory(target);" in text
+    assert "if (!downloadDir) {" in text
+    assert "showToast(\"已取消批量导出\", null);" in text
+    assert "download_dir: downloadDir" in text
+
+
+def test_renderer_script_project_export_only_shows_on_project_row_hover():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+    assert 'codexDeleteStyleVersion = "8"' in text
+    assert '[data-app-action-sidebar-project-row]:hover .${projectActionGroupClass}' in text
+    assert '[data-app-action-sidebar-project-row]:focus-within .${projectActionGroupClass}' in text
+    assert '[role="listitem"][aria-label]:hover .${projectActionGroupClass}' not in text
+    assert '[role="listitem"][aria-label]:focus-within .${projectActionGroupClass}' not in text
 
 
 def test_renderer_script_uses_chinese_delete_toast_fallbacks():
@@ -593,3 +614,24 @@ def test_renderer_script_can_move_sidebar_threads_between_projects():
     assert "openProjectMoveMenuForRow" in text
     assert "existingMoveButton" in text
     assert "普通对话" in text
+
+
+def test_renderer_script_can_bulk_export_project_threads_from_sidebar():
+    text = Path("codex_session_delete/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "codex-project-export-button" in text
+    assert "codexProjectExportVersion = \"1\"" in text
+    assert "codex-project-actions" in text
+    assert "function projectTargetFromRow" in text
+    assert "function projectActionGroupFromRow" in text
+    assert "function attachProjectExportButton" in text
+    assert "function exportProjectMarkdown" in text
+    assert "textContent = \"批量导出\"" in text
+    assert "button.textContent = \"导出中\"" in text
+    assert "postJson(\"/export-project-markdown\"" in text
+    assert "project_label: target.label || displayProjectName(target.path)" in text
+    assert "window.getComputedStyle(projectRow).position === \"static\"" in text
+    assert "projectRow.style.position = \"relative\"" in text
+    assert "postJson(\"/project-threads\"" not in text
+    assert "settings.markdownExport" in text
+    assert "nativeProjectTargets().forEach((target) => {" in text

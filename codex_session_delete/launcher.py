@@ -64,7 +64,6 @@ class ApiFirstDeleteService:
             return {"status": DeleteStatus.FAILED.value, "message": "No local database configured", "sort_keys": []}
         return self.local_adapter.codex_thread_sort_keys(sessions)
 
-
 class InjectedHelperServer(HelperServer):
     bridge_socket: Any = None
 
@@ -412,6 +411,14 @@ def handle_bridge_request(
     if path == "/export-markdown":
         session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
         return export_service.export(session).to_dict()
+    if path == "/choose-export-directory":
+        return export_service.choose_output_directory(str(payload.get("initial_dir", "")) or None)
+    if path == "/export-project-markdown":
+        return export_service.export_project(
+            str(payload.get("target_cwd", "")),
+            str(payload.get("project_label", "")) or None,
+            str(payload.get("download_dir", "")) or None,
+        )
     if path == "/archived-thread":
         session = service.find_archived_thread_by_title(str(payload.get("title", "")))
         return {"session_id": session.session_id, "title": session.title} if session else {"session_id": "", "title": ""}
