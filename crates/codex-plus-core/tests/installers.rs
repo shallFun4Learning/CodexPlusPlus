@@ -64,6 +64,14 @@ fn macos_bundle_metadata_contains_silent_and_manager_apps() {
             .info_plist
             .contains("<string>Codex++ 管理工具</string>")
     );
+    assert_eq!(
+        silent.launch_target,
+        std::path::PathBuf::from("/opt/Codex++/codex-plus-plus")
+    );
+    assert_eq!(
+        manager.launch_target,
+        std::path::PathBuf::from("/opt/Codex++/codex-plus-plus-manager")
+    );
     assert!(silent.source_app.is_none());
     assert!(manager.source_app.is_none());
     assert!(silent.launch_script.contains("codex-plus-plus"));
@@ -117,10 +125,22 @@ fn macos_bundle_builder_uses_explicit_companion_binaries_without_self_reference(
             .launch_script
             .contains("/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus")
     );
+    assert_eq!(
+        silent.launch_target,
+        std::path::PathBuf::from(
+            "/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus"
+        )
+    );
     assert!(
         manager
             .launch_script
             .contains("/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus-manager")
+    );
+    assert_eq!(
+        manager.launch_target,
+        std::path::PathBuf::from(
+            "/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus-manager"
+        )
     );
     assert!(!silent.launch_script.contains(
         "/Applications/Codex++.app/Contents/MacOS/CodexPlusPlus"

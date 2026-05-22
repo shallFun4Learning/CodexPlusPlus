@@ -33,9 +33,11 @@ pub fn build_app_bundle(options: &InstallOptions, manager: bool) -> MacosAppBund
         binary,
     );
     let identifier_suffix = if manager { ".manager" } else { "" };
+    let app_path = install_root.join(format!("{display_name}.app"));
     MacosAppBundle {
-        app_path: install_root.join(format!("{display_name}.app")),
+        app_path: app_path.clone(),
         info_plist: info_plist(display_name, executable_name, identifier_suffix),
+        launch_target: target.clone(),
         launch_script: format!("#!/bin/sh\nexec \"{}\"\n", target.to_string_lossy()),
         source_app: source_bundle_for_manager_runtime(manager),
     }
@@ -81,6 +83,17 @@ fn write_bundle(bundle: &MacosAppBundle) -> anyhow::Result<()> {
             return Ok(());
         }
         return Ok(());
+    }
+    let self_target = bundle
+        .app_path
+        .join("Contents")
+        .join("MacOS")
+        .join(executable_name_from_plist(&bundle.info_plist));
+    if bundle.launch_target == self_target {
+        anyhow::bail!(
+            "refusing to install self-referential app bundle at {}",
+            bundle.app_path.display()
+        );
     }
     let contents = bundle.app_path.join("Contents");
     let macos = contents.join("MacOS");

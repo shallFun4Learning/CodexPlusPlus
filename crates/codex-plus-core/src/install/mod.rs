@@ -47,6 +47,7 @@ pub struct InstallActionResult {
 pub struct MacosAppBundle {
     pub app_path: PathBuf,
     pub info_plist: String,
+    pub launch_target: PathBuf,
     pub launch_script: String,
     pub source_app: Option<PathBuf>,
 }
