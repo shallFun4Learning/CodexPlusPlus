@@ -771,6 +771,7 @@
 
   let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch" };
   let codexPlusBackendSettingsLoaded = false;
+  const providerSyncEnableWarning = "开启“历史会话修复”存在风险：它会在启动前批量改写本地历史会话元数据，可能导致部分历史会话暂时不可见或归属异常。仅在你明确需要修复跨 provider 历史会话显示问题时再开启。是否继续开启？";
   let codexServiceTierState = {
     status: "loading",
     serviceTier: null,
@@ -1703,7 +1704,7 @@
               <button type="button" class="codex-plus-toggle" data-codex-plus-setting="zedRemoteOpen"><span></span></button>
             </div>
             <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">历史会话修复</div><div class="codex-plus-row-description">切换官方登录、混合 API 或纯 API 后，让旧对话重新显示在当前模式下。</div></div>
+              <div><div class="codex-plus-row-title">历史会话修复</div><div class="codex-plus-row-description">默认关闭。切换官方登录、混合 API 或纯 API 后，可手动开启以尝试让旧对话重新显示在当前模式下。</div></div>
               <button type="button" class="codex-plus-toggle" data-codex-backend-setting="providerSyncEnabled"><span></span></button>
             </div>
             <div class="codex-plus-row">
@@ -1872,7 +1873,11 @@
       const backendToggle = target?.closest("[data-codex-backend-setting]");
       if (backendToggle) {
         const key = backendToggle.getAttribute("data-codex-backend-setting");
-        setBackendSetting(key, !codexPlusBackendSettings[key]);
+        const nextValue = !codexPlusBackendSettings[key];
+        if (key === "providerSyncEnabled" && nextValue && !window.confirm(providerSyncEnableWarning)) {
+          return;
+        }
+        setBackendSetting(key, nextValue);
         return;
       }
     }, true);
