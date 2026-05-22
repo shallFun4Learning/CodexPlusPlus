@@ -339,6 +339,9 @@ const defaultSettings: BackendSettings = {
   cliWrapperApiKeyEnv: "CUSTOM_OPENAI_API_KEY",
 };
 
+const PROVIDER_SYNC_ENABLE_WARNING =
+  "开启“历史会话修复”存在风险：它会在启动前批量改写本地历史会话元数据，可能导致部分历史会话暂时不可见或归属异常。仅在你明确需要修复跨 provider 历史会话显示问题时再开启。是否继续开启？";
+
 export function App() {
   const [theme, setTheme] = useState<Theme>(() => loadInitialTheme());
   const [route, setRoute] = useState<Route>(() => loadInitialRoute());
@@ -611,7 +614,15 @@ export function App() {
   };
 
   const saveSettings = async () => {
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: settingsForm }));
+    const nextSettings = normalizeSettings(settingsForm);
+    const currentSettings = settings ? normalizeSettings(settings.settings) : defaultSettings;
+    if (!currentSettings.providerSyncEnabled && nextSettings.providerSyncEnabled) {
+      if (!window.confirm(PROVIDER_SYNC_ENABLE_WARNING)) {
+        setSettingsForm(currentSettings);
+        return;
+      }
+    }
+    const result = await run(() => call<SettingsResult>("save_settings", { settings: nextSettings }));
     if (result) {
       setSettings(result);
       setSettingsForm(normalizeSettings(result.settings));
@@ -1518,6 +1529,7 @@ function ProviderSyncScreen({
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
 }) {
+  const currentEnabled = settings?.settings.providerSyncEnabled ?? false;
   return (
     <>
       <Panel>
@@ -1526,12 +1538,21 @@ function ProviderSyncScreen({
           <label className="switch-row">
             <input
               checked={form.providerSyncEnabled}
-              onChange={(event) => onFormChange({ ...form, providerSyncEnabled: event.currentTarget.checked })}
+              onChange={(event) => {
+                const nextEnabled = event.currentTarget.checked;
+                if (nextEnabled && !currentEnabled) {
+                  if (!window.confirm(PROVIDER_SYNC_ENABLE_WARNING)) {
+                    event.currentTarget.checked = false;
+                    return;
+                  }
+                }
+                onFormChange({ ...form, providerSyncEnabled: nextEnabled });
+              }}
               type="checkbox"
             />
             <span>
               <strong>启动前自动修复历史会话</strong>
-              <small>开启后，通过 Codex++ 启动 Codex 前自动整理一次旧对话的归属标记。</small>
+              <small>默认关闭。开启后，通过 Codex++ 启动 Codex 前自动整理一次旧对话的归属标记。</small>
             </span>
           </label>
           <div className="relay-grid compact">
