@@ -48,6 +48,7 @@ pub struct MacosAppBundle {
     pub app_path: PathBuf,
     pub info_plist: String,
     pub launch_script: String,
+    pub source_app: Option<PathBuf>,
 }
 
 impl ShortcutState {
@@ -252,6 +253,17 @@ fn macos_silent_app_binary_from_exe(exe: &Path) -> Option<PathBuf> {
             .join("MacOS")
             .join("CodexPlusPlus")
     })
+}
+
+pub fn macos_app_bundle_from_exe(exe: &Path) -> Option<PathBuf> {
+    let mut path = exe;
+    while let Some(parent) = path.parent() {
+        if path.extension().and_then(|extension| extension.to_str()) == Some("app") {
+            return Some(path.to_path_buf());
+        }
+        path = parent;
+    }
+    None
 }
 
 fn macos_applications_dir_from_exe(exe: &Path) -> Option<PathBuf> {

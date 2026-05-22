@@ -3,11 +3,11 @@ use std::fs;
 #[cfg(target_os = "macos")]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(target_os = "macos")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{
     InstallOptions, MANAGER_BINARY, MANAGER_NAME, MacosAppBundle, SILENT_BINARY, SILENT_NAME,
-    install_root_or_default, option_or_current_exe,
+    install_root_or_default, macos_app_bundle_from_exe, option_or_current_exe,
 };
 
 pub fn build_app_bundle(options: &InstallOptions, manager: bool) -> MacosAppBundle {
@@ -36,6 +36,7 @@ pub fn build_app_bundle(options: &InstallOptions, manager: bool) -> MacosAppBund
         app_path: install_root.join(format!("{display_name}.app")),
         info_plist: info_plist(display_name, executable_name, identifier_suffix),
         launch_script: format!("#!/bin/sh\nexec \"{}\"\n", target.to_string_lossy()),
+        source_app: source_bundle_for_manager_runtime(manager),
     }
 }
 
@@ -70,6 +71,16 @@ pub fn uninstall_app_bundles(_options: &InstallOptions) -> anyhow::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn write_bundle(bundle: &MacosAppBundle) -> anyhow::Result<()> {
+    if let Some(source_app) = bundle.source_app.as_ref().filter(|source| source.exists()) {
+        if source_app != &bundle.app_path {
+            if bundle.app_path.exists() {
+                fs::remove_dir_all(&bundle.app_path)?;
+            }
+            copy_app_bundle(source_app, &bundle.app_path)?;
+            return Ok(());
+        }
+        return Ok(());
+    }
     let contents = bundle.app_path.join("Contents");
     let macos = contents.join("MacOS");
     let resources = contents.join("Resources");
@@ -95,6 +106,55 @@ fn copy_icon(resources: &Path) -> anyhow::Result<()> {
         fs::copy(source, resources.join("codex-plus-plus.png"))?;
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn source_bundle_for_manager_runtime(manager: bool) -> Option<PathBuf> {
+    let current_exe = std::env::current_exe().ok()?;
+    let current_bundle = macos_app_bundle_from_exe(&current_exe)?;
+    let applications_dir = current_bundle.parent()?.to_path_buf();
+    let current_name = current_bundle.file_name()?.to_str()?;
+    let expected_current = if manager {
+        format!("{MANAGER_NAME}.app")
+    } else {
+        format!("{SILENT_NAME}.app")
+    };
+
+    if current_name == expected_current {
+        return Some(current_bundle);
+    }
+
+    if current_name == format!("{MANAGER_NAME}.app") {
+        let sibling = applications_dir.join(format!("{SILENT_NAME}.app"));
+        if sibling.exists() {
+            return Some(sibling);
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn source_bundle_for_manager_runtime(_manager: bool) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn copy_app_bundle(source: &Path, destination: &Path) -> anyhow::Result<()> {
+    let status = std::process::Command::new("cp")
+        .arg("-R")
+        .arg(source)
+        .arg(destination)
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "failed to copy app bundle from {} to {}",
+            source.display(),
+            destination.display()
+        )
+    }
 }
 
 #[cfg(target_os = "macos")]

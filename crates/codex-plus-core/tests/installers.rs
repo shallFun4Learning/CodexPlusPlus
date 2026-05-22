@@ -64,6 +64,8 @@ fn macos_bundle_metadata_contains_silent_and_manager_apps() {
             .info_plist
             .contains("<string>Codex++ 管理工具</string>")
     );
+    assert!(silent.source_app.is_none());
+    assert!(manager.source_app.is_none());
     assert!(silent.launch_script.contains("codex-plus-plus"));
     assert!(manager.launch_script.contains("codex-plus-plus-manager"));
 }
@@ -92,6 +94,39 @@ fn companion_binary_path_resolves_macos_silent_app_next_to_manager_app() {
             "/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus"
         )
     );
+}
+
+#[test]
+fn macos_bundle_builder_uses_explicit_companion_binaries_without_self_reference() {
+    let options = InstallOptions {
+        install_root: Some("/Applications".into()),
+        launcher_path: Some(
+            "/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus".into(),
+        ),
+        manager_path: Some(
+            "/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus-manager".into(),
+        ),
+        remove_owned_data: false,
+    };
+
+    let silent = build_macos_app_bundle(&options, false);
+    let manager = build_macos_app_bundle(&options, true);
+
+    assert!(
+        silent
+            .launch_script
+            .contains("/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus")
+    );
+    assert!(
+        manager
+            .launch_script
+            .contains("/Applications/Codex++ 管理工具.app/Contents/MacOS/codex-plus-plus-manager")
+    );
+    assert!(!silent.launch_script.contains(
+        "/Applications/Codex++.app/Contents/MacOS/CodexPlusPlus"
+    ));
+    assert!(silent.source_app.is_none());
+    assert!(manager.source_app.is_none());
 }
 
 #[test]
