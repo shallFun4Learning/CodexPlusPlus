@@ -106,6 +106,9 @@ fn macos_packager_hides_silent_launcher_but_not_manager() {
     assert!(script.contains(
         "create_app \"Codex++ 管理工具\" \"CodexPlusPlusManager\" \"$BINARY_DIR/codex-plus-plus-manager\" \"com.bigpizzav3.codexplusplus.manager\" \"false\""
     ));
+    assert!(script.contains(
+        "cp -R \"$STAGE/Codex++.app\" \"$STAGE/Codex++ 管理工具.app/Contents/Resources/Codex++.app\""
+    ));
 }
 
 #[test]

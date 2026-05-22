@@ -235,8 +235,11 @@ pub fn companion_binary_path_from_exe(exe: &Path, binary: &str) -> PathBuf {
     let dir = exe.parent().unwrap_or_else(|| Path::new("."));
     let suffix = if cfg!(windows) { ".exe" } else { "" };
     if binary == SILENT_BINARY {
-        if let Some(sibling_app_binary) = macos_silent_app_binary_from_exe(exe) {
-            return sibling_app_binary;
+        if let Some(installed_silent_binary) = macos_installed_silent_app_binary_from_exe(exe) {
+            return installed_silent_binary;
+        }
+        if let Some(bundled_silent_binary) = macos_bundled_silent_app_binary_from_exe(exe) {
+            return bundled_silent_binary;
         }
         let same_bundle = dir.join(binary);
         if same_bundle.exists() {
@@ -246,14 +249,21 @@ pub fn companion_binary_path_from_exe(exe: &Path, binary: &str) -> PathBuf {
     dir.join(format!("{binary}{suffix}"))
 }
 
-fn macos_silent_app_binary_from_exe(exe: &Path) -> Option<PathBuf> {
-    macos_applications_dir_from_exe(exe).map(|applications_dir| {
-        applications_dir
-            .join(format!("{SILENT_NAME}.app"))
-            .join("Contents")
-            .join("MacOS")
-            .join("CodexPlusPlus")
-    })
+fn macos_installed_silent_app_binary_from_exe(exe: &Path) -> Option<PathBuf> {
+    let binary = macos_applications_dir_from_exe(exe)?
+        .join(format!("{SILENT_NAME}.app"))
+        .join("Contents")
+        .join("MacOS")
+        .join("CodexPlusPlus");
+    binary.exists().then_some(binary)
+}
+
+fn macos_bundled_silent_app_binary_from_exe(exe: &Path) -> Option<PathBuf> {
+    let binary = macos_bundled_silent_app_from_bundle(&macos_app_bundle_from_exe(exe)?)
+        .join("Contents")
+        .join("MacOS")
+        .join("CodexPlusPlus");
+    binary.exists().then_some(binary)
 }
 
 pub fn macos_app_bundle_from_exe(exe: &Path) -> Option<PathBuf> {
@@ -265,6 +275,13 @@ pub fn macos_app_bundle_from_exe(exe: &Path) -> Option<PathBuf> {
         path = parent;
     }
     None
+}
+
+pub(crate) fn macos_bundled_silent_app_from_bundle(bundle: &Path) -> PathBuf {
+    bundle
+        .join("Contents")
+        .join("Resources")
+        .join(format!("{SILENT_NAME}.app"))
 }
 
 fn macos_applications_dir_from_exe(exe: &Path) -> Option<PathBuf> {

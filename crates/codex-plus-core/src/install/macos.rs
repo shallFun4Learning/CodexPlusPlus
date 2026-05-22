@@ -8,8 +8,11 @@ use std::path::Path;
 
 use super::{
     InstallOptions, MANAGER_BINARY, MANAGER_NAME, MacosAppBundle, SILENT_BINARY, SILENT_NAME,
-    install_root_or_default, macos_app_bundle_from_exe, option_or_current_exe,
+    install_root_or_default, macos_app_bundle_from_exe, macos_bundled_silent_app_from_bundle,
+    option_or_current_exe,
 };
+
+const ICON_NAME: &str = "codex-plus-plus.icns";
 
 pub fn build_app_bundle(options: &InstallOptions, manager: bool) -> MacosAppBundle {
     let install_root = install_root_or_default(options);
@@ -114,10 +117,10 @@ fn write_bundle(bundle: &MacosAppBundle) -> anyhow::Result<()> {
 fn copy_icon(resources: &Path) -> anyhow::Result<()> {
     let source = std::env::current_exe()
         .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .map(|path| path.join("codex-plus-plus.png"));
+        .and_then(|path| macos_app_bundle_from_exe(&path))
+        .map(|bundle| bundle.join("Contents").join("Resources").join(ICON_NAME));
     if let Some(source) = source.filter(|path| path.exists()) {
-        fs::copy(source, resources.join("codex-plus-plus.png"))?;
+        fs::copy(source, resources.join(ICON_NAME))?;
     }
     Ok(())
 }
@@ -125,7 +128,12 @@ fn copy_icon(resources: &Path) -> anyhow::Result<()> {
 #[cfg(target_os = "macos")]
 fn source_bundle_for_manager_runtime(manager: bool) -> Option<PathBuf> {
     let current_exe = std::env::current_exe().ok()?;
-    let current_bundle = macos_app_bundle_from_exe(&current_exe)?;
+    source_bundle_for_runtime_from_exe(&current_exe, manager)
+}
+
+#[cfg(target_os = "macos")]
+fn source_bundle_for_runtime_from_exe(current_exe: &Path, manager: bool) -> Option<PathBuf> {
+    let current_bundle = macos_app_bundle_from_exe(current_exe)?;
     let applications_dir = current_bundle.parent()?.to_path_buf();
     let current_name = current_bundle.file_name()?.to_str()?;
     let expected_current = if manager {
@@ -142,6 +150,10 @@ fn source_bundle_for_manager_runtime(manager: bool) -> Option<PathBuf> {
         let sibling = applications_dir.join(format!("{SILENT_NAME}.app"));
         if sibling.exists() {
             return Some(sibling);
+        }
+        let bundled = macos_bundled_silent_app_from_bundle(&current_bundle);
+        if bundled.exists() {
+            return Some(bundled);
         }
     }
 
@@ -182,6 +194,75 @@ fn executable_name_from_plist(plist: &str) -> String {
         .to_string()
 }
 
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::source_bundle_for_runtime_from_exe;
+    use tempfile::tempdir;
+
+    #[test]
+    fn manager_runtime_uses_bundled_silent_app_when_sibling_is_missing() {
+        let temp = tempdir().expect("create tempdir");
+        let manager_exe = temp
+            .path()
+            .join("Applications")
+            .join("Codex++ 管理工具.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("CodexPlusPlusManager");
+        let bundled_silent = temp
+            .path()
+            .join("Applications")
+            .join("Codex++ 管理工具.app")
+            .join("Contents")
+            .join("Resources")
+            .join("Codex++.app");
+
+        std::fs::create_dir_all(manager_exe.parent().expect("manager parent"))
+            .expect("create manager bundle");
+        std::fs::write(&manager_exe, "").expect("write manager executable");
+        std::fs::create_dir_all(&bundled_silent).expect("create bundled silent app");
+
+        assert_eq!(
+            source_bundle_for_runtime_from_exe(&manager_exe, false),
+            Some(bundled_silent)
+        );
+    }
+
+    #[test]
+    fn manager_runtime_prefers_installed_silent_app_over_bundled_template() {
+        let temp = tempdir().expect("create tempdir");
+        let manager_exe = temp
+            .path()
+            .join("Applications")
+            .join("Codex++ 管理工具.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("CodexPlusPlusManager");
+        let installed_silent = temp
+            .path()
+            .join("Applications")
+            .join("Codex++.app");
+        let bundled_silent = temp
+            .path()
+            .join("Applications")
+            .join("Codex++ 管理工具.app")
+            .join("Contents")
+            .join("Resources")
+            .join("Codex++.app");
+
+        std::fs::create_dir_all(manager_exe.parent().expect("manager parent"))
+            .expect("create manager bundle");
+        std::fs::write(&manager_exe, "").expect("write manager executable");
+        std::fs::create_dir_all(&installed_silent).expect("create installed silent app");
+        std::fs::create_dir_all(&bundled_silent).expect("create bundled silent app");
+
+        assert_eq!(
+            source_bundle_for_runtime_from_exe(&manager_exe, false),
+            Some(installed_silent)
+        );
+    }
+}
+
 fn info_plist(display_name: &str, executable_name: &str, identifier_suffix: &str) -> String {
     let version = crate::version::VERSION;
     format!(
@@ -204,7 +285,7 @@ fn info_plist(display_name: &str, executable_name: &str, identifier_suffix: &str
   <key>CFBundleExecutable</key>
   <string>{executable_name}</string>
   <key>CFBundleIconFile</key>
-  <string>codex-plus-plus.png</string>
+  <string>{ICON_NAME}</string>
   <key>LSUIElement</key>
   <true/>
   <key>LSMinimumSystemVersion</key>
